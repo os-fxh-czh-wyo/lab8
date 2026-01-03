@@ -350,6 +350,7 @@ sfs_bmap_free_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, uint32_t index) 
  * @index:    the logical index of disk block in inode
  * @ino_store:the NO. of disk block
  */
+// 将文件内的“逻辑块索引”映射到磁盘块号
 static int
 sfs_bmap_load_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, uint32_t index, uint32_t *ino_store) {
     struct sfs_disk_inode *din = sin->din;
@@ -542,40 +543,44 @@ sfs_close(struct inode *node) {
 
 /*  
  * sfs_io_nolock - Rd/Wr a file contentfrom offset position to offset+ length  disk blocks<-->buffer (in memroy)
- * @sfs:      sfs file system
- * @sin:      sfs inode in memory
- * @buf:      the buffer Rd/Wr
- * @offset:   the offset of file
- * @alenp:    the length need to read (is a pointer). and will RETURN the really Rd/Wr lenght
- * @write:    BOOL, 0 read, 1 write
+ * @sfs:      sfs file system 文件系统上下文
+ * @sin:      sfs inode in memory 内存中的 inode
+ * @buf:      the buffer Rd/Wr 用户/内核缓冲区指针
+ * @offset:   the offset of file 文件起始字节偏移
+ * @alenp:    the length need to read (is a pointer). and will RETURN the really Rd/Wr lenght 指向请求长度，返回实际处理长度
+ * @write:    BOOL, 0 read, 1 write 若为 true 则写操作，否则读操作。
  */
+ // 在不加锁的上下文中把文件的部分或全部内容在内存缓冲区与磁盘块间读/写，返回实际读/写字节数。
 static int
 sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset, size_t *alenp, bool write) {
-    struct sfs_disk_inode *din = sin->din;
-    assert(din->type != SFS_TYPE_DIR);
-    off_t endpos = offset + *alenp, blkoff;
+    // 1. 拿到磁盘 inode 结构体指针 din、以及读/写操作的结束位置 endpos 和块内偏移量 blkoff
+    struct sfs_disk_inode *din = sin->din; // 磁盘 inode 结构体指针
+    assert(din->type != SFS_TYPE_DIR); // 该 inode 不是目录类型
+    off_t endpos = offset + *alenp, blkoff; // endpos: 读/写操作的结束位置（绝对）；blkoff: 块内偏移量
     *alenp = 0;
 	// calculate the Rd/Wr end position
     if (offset < 0 || offset >= SFS_MAX_FILE_SIZE || offset > endpos) {
-        return -E_INVAL;
+        return -E_INVAL; // 参数无效
     }
     if (offset == endpos) {
-        return 0;
+        return 0; // 无需读写，直接返回
     }
     if (endpos > SFS_MAX_FILE_SIZE) {
-        endpos = SFS_MAX_FILE_SIZE;
+        endpos = SFS_MAX_FILE_SIZE; // 调整结束位置，防止超出文件系统最大文件大小
     }
     if (!write) {
         if (offset >= din->size) {
+            // 读取位置在文件末尾之后，直接返回0
             return 0;
         }
-        if (endpos > din->size) {
+        if (endpos > din->size) { // 调整结束位置，防止超出文件实际大小
             endpos = din->size;
         }
     }
 
-    int (*sfs_buf_op)(struct sfs_fs *sfs, void *buf, size_t len, uint32_t blkno, off_t offset);
-    int (*sfs_block_op)(struct sfs_fs *sfs, void *buf, uint32_t blkno, uint32_t nblks);
+    // 2. 拿到读/写块缓冲区函数指针 sfs_buf_op 和读/写连续块函数指针 sfs_block_op
+    int (*sfs_buf_op)(struct sfs_fs *sfs, void *buf, size_t len, uint32_t blkno, off_t offset); // sfs_buf_op: 指向读/写块缓冲区函数的指针
+    int (*sfs_block_op)(struct sfs_fs *sfs, void *buf, uint32_t blkno, uint32_t nblks); // sfs_block_op: 指向读/写连续块函数的指针
     if (write) {
         sfs_buf_op = sfs_wbuf, sfs_block_op = sfs_wblock;
     }
@@ -583,11 +588,11 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
         sfs_buf_op = sfs_rbuf, sfs_block_op = sfs_rblock;
     }
 
-    int ret = 0;
-    size_t size, alen = 0;
-    uint32_t ino;
-    uint32_t blkno = offset / SFS_BLKSIZE;          // The NO. of Rd/Wr begin block
-    uint32_t nblks = endpos / SFS_BLKSIZE - blkno;  // The size of Rd/Wr blocks
+    int ret = 0; // 函数返回值
+    size_t size, alen = 0; // size: 当前读/写操作的字节数；alen: 累计已读/写字节数
+    uint32_t ino; // 磁盘块号
+    uint32_t blkno = offset / SFS_BLKSIZE; // 起始块号
+    uint32_t nblks = endpos / SFS_BLKSIZE - blkno; // 完整块数
 
   //LAB8:EXERCISE1 YOUR CODE HINT: call sfs_bmap_load_nolock, sfs_rbuf, sfs_rblock,etc. read different kind of blocks in file
 	/*
@@ -599,12 +604,48 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
      * (3) If end position isn't aligned with the last block, Rd/Wr some content from begin to the (endpos % SFS_BLKSIZE) of the last block
 	 *       NOTICE: useful function: sfs_bmap_load_nolock, sfs_buf_op	
 	*/
-
-    
-
-out:
+    // 3. 完成读/写操作
+    // (1) 处理起始块的非对齐部分
+    if ((blkoff = offset % SFS_BLKSIZE) != 0) 
+    {
+        size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) { // 加载起始块的磁盘块号
+            goto out;
+        }
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, blkoff)) != 0) { // 读/写起始块的非对齐部分
+            goto out;
+        }
+        alen += size;
+        if (nblks == 0) {
+            goto out;
+        }
+        buf += size, blkno ++, nblks --;
+    }
+    // (2) 处理中间的对齐块
+    size = SFS_BLKSIZE;
+    while (nblks != 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) { // 加载当前块的磁盘块号
+            goto out;
+        }
+        if ((ret = sfs_block_op(sfs, buf, ino, 1)) != 0) { // 读/写当前块
+            goto out;
+        }
+        alen += size, buf += size, blkno ++, nblks --;
+    }
+    // (3) 处理结束块的非对齐部分
+    if ((size = endpos % SFS_BLKSIZE) != 0) {
+        if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) { // 加载结束块的磁盘块号
+            goto out;
+        }
+        if ((ret = sfs_buf_op(sfs, buf, size, ino, 0)) != 0) { // 读/写结束块的非对齐部分
+            goto out;
+        }
+        alen += size;
+    }
+out: // 跳转到这里进行清理和返回
     *alenp = alen;
     if (offset + alen > sin->din->size) {
+        // 更新文件大小并标记 inode 为脏
         sin->din->size = offset + alen;
         sin->dirty = 1;
     }
