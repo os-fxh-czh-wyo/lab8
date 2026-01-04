@@ -19,6 +19,7 @@
 
 #define TICK_NUM 2
 
+void dev_stdin_write(char c);
 static void print_ticks()
 {
     cprintf("%d ticks\n", TICK_NUM);

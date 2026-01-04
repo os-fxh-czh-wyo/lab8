@@ -4,6 +4,10 @@
 #include <ide.h>
 #include <pmm.h>
 #include <assert.h>
+#ifndef swap_offset
+// swap entry 格式：高 24 位是磁盘偏移，低 8 位是标志位
+#define swap_offset(entry) (((entry) >> 8) & 0xFFFFFF)
+#endif
 size_t max_swap_offset;
 void swapfs_init(void)
 {

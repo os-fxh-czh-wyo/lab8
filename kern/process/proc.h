@@ -104,4 +104,8 @@ int do_execve(const char *name, int argc, const char **argv);
 int do_wait(int pid, int *code_store);
 int do_kill(int pid);
 int do_sleep(unsigned int time);
+static int copy_files(uint32_t clone_flags, struct proc_struct *proc);
+static void put_files(struct proc_struct *proc);
+static int load_icode(int fd, int argc, char **kargv);
+static int load_icode_read(int fd, void *buf, size_t len, off_t offset);
 #endif /* !__KERN_PROCESS_PROC_H__ */

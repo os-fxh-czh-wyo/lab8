@@ -23,7 +23,12 @@ wait(void) {
 
 int
 waitpid(int pid, int *store) {
-    return sys_wait(pid, store);
+    int64_t store64 = 0;
+    int ret = sys_wait(pid, store ? &store64 : NULL);
+    if (store != NULL) {
+        *store = (int)store64;  // 注意：可能丢失高32位
+    }
+    return ret;
 }
 
 void
