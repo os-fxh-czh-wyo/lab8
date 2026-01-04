@@ -319,7 +319,7 @@ swapimg=$(make_print swapimg)
 qemuopts="-machine virt -nographic -bios default -device loader,file=bin/ucore.img,addr=0x80200000"
 
 ## set break-function, default is readline
-brkfun=readline
+brkfun=
 
 run_qemu
 
